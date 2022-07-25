@@ -1,0 +1,99 @@
+#!/bin/bash
+
+# Download and install the MVPS adblockng hosts file every month
+# This needs to run as root
+
+# modified 6/7/17 to strip Windows linefeeds for Mac and Linux
+# Modifed 7/6/18 purely as an exercise for arrays and stuff.
+# on 7/6/18 this was actually the 3rd version of the script
+
+cd ~
+mkdir .working
+cd .working
+
+platform=`uname -a | awk '{print $1}'`
+
+# Get the MVPS hosts file
+curl -O http://winhelp2002.mvps.org/hosts.zip
+
+# If that fails, we have a problem!
+if [ $? -ne 0 ]
+then
+  echo "# `date` THERE WAS AN ERROR INTEGRATING THE MVPS ADBLOCKING FILE" > hostsfile
+  cat /etc/hosts >> hostsfile
+  mv /etc/hosts /etc/hosts.prev
+  mv hostsfile /etc/hosts
+
+elif [ $platform = "Darwin" ]
+   # It didn't fail, so we're on a Mac ...
+   then
+     # Get amount of lines we need from current /etc/hosts
+     lines=`grep -m 1 -n "MVPS HOSTS file" /etc/hosts | tr -dc '0-9'`;lines=$(( lines - 1 ))
+   
+     # Put those lines into temp file
+     mkfifo temp.pipe
+     #head -n $lines /etc/hosts > hostsfile
+     head -n $lines /etc/hosts > temp.pipe &
+
+     unzip hosts.zip
+
+     # Change Windows line endings to UNIX
+     # this way works on Linux OR a Mac
+
+     tr -d '\r' < HOSTS > hosts.new
+
+     # Grep only what we need from MVPS into temp file
+     #cat hosts.new | grep -v localhost >> hostsfile
+     cat hosts.new | grep -v localhost >> temp.pipe &
+     mv /etc/hosts /etc/hosts.prev
+     #mv hostsfile /etc/hosts
+     cat temp.pipe > /etc/hosts
+
+elif [ $platform = "Linux" ]
+   # we're on Linux
+   then
+     
+     unzip hosts.zip
+
+     # Change Windows line endings to UNIX
+     # this way works on Linux OR a Mac
+
+     ##tr -d '\r' < HOSTS > hosts.new
+     
+     # Read d/l'd hosts file into an array
+     
+     #readarray hosts_array < hosts.new
+     #readarray hosts_array < <(tr -d '\r' < HOSTS)
+     mapfile -t hosts_array < <(tr -d '\r' < HOSTS)
+
+     # delete from the "MVPS" line to end of file in /etc/hosts
+     sed -i '/MVPS/,$d' /etc/hosts
+
+     index=0
+     status=1
+     
+     while [ $status -eq 1 ]
+     # Go through array until we find the line we want
+     do
+       echo ${hosts_array[$index]}  | grep MVPS > /dev/null
+       status=$?
+       if [ $status -eq 1 ]
+       then
+         ((index++))
+       fi
+     done
+     
+     # Write everything from that line out into /etc/hosts
+     until [ $index -gt ${#hosts_array[@]} ]
+     do
+       echo ${hosts_array[$index]} >> /etc/hosts
+       ((index++))
+     done
+
+fi
+
+
+
+# Clean up
+cd ..
+rm -rf .working
